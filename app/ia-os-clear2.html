@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>IA local + Chat — ozclef</title>
+
+<!-- LZString (compresión) -->
+<script src="https://cdn.jsdelivr.net/npm/lz-string@1.4.4/libs/lz-string.min.js"></script>
+<!-- Firebase (compat) - se usa solo si pegas config -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+<style>
+  :root{ --accent:#4f46e5; --muted:#6b7280; --max-w:1000px; }
+  *{box-sizing:border-box}
+  body{ margin:0; font-family:Inter,system-ui,Arial; background:linear-gradient(135deg,#f7f7ff,#fff); color:#111; padding:20px; display:flex; justify-content:center; }
+  .wrap{ width:100%; max-width:var(--max-w); }
+  header{ display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; }
+  h1{ margin:0; font-size:1.2rem; }
+  .meta{ font-size:0.9rem; color:var(--muted); text-align:right; }
+  .grid{ display:grid; grid-template-columns: 1fr 360px; gap:16px; }
+  @media(max-width:900px){ .grid{ grid-template-columns:1fr } .sidebar{ order:-1 } }
+
+  .card{ background:#fff; border-radius:10px; padding:12px; box-shadow: 0 8px 24px rgba(15,23,42,0.06); }
+  .small{ font-size:0.85rem; color:var(--muted); }
+
+  /* chat */
+  .chat-window{ display:flex; flex-direction:column; height:560px; }
+  .messages{ flex:1; overflow:auto; padding:12px; display:flex; flex-direction:column; gap:8px; }
+  .msg{ max-width:78%; padding:8px 10px; border-radius:10px; background:#f3f4f6; }
+  .msg.me{ align-self:flex-end; background:linear-gradient(90deg,var(--accent),#3b82f6); color:#fff; }
+  .msg .meta{ font-size:0.72rem; color:rgba(0,0,0,0.45); margin-top:6px; display:block; }
+
+  .composer{ display:flex; gap:8px; margin-top:8px; }
+  .composer input[type="text"]{ flex:1; padding:10px; border-radius:8px; border:1px solid #e6e6e6; }
+  .composer button{ padding:10px 12px; border-radius:8px; background:var(--accent); color:#fff; border:0; cursor:pointer; }
+
+  .files-list{ max-height:220px; overflow:auto; margin-top:8px; border:1px dashed #eee; padding:8px; border-radius:8px; }
+  .files-list div{ padding:6px; border-bottom:1px solid #fafafa; font-size:0.95rem; cursor:pointer; }
+  .btn { padding:8px 10px; border-radius:8px; border:0; background:var(--accent); color:#fff; cursor:pointer; }
+  .btn.ghost { background:#fff; color:var(--accent); border:1px solid #e6e6e6; }
+  .note { font-size:0.85rem; color:var(--muted); margin-top:6px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>IA local + Chat — ozclef</h1>
+      <div class="meta">
+        Visitas: <strong id="visitas">cargando...</strong><br>
+        Estado: <span id="onlineStatus">verificando...</span>
+      </div>
+    </header>
+
+    <div class="grid">
+      <!-- main -->
+      <main class="card">
+        <h3 class="small">Chat (offline & online)</h3>
+        <div class="chat-window" style="margin-top:8px;">
+          <div id="messages" class="messages" aria-live="polite"></div>
+
+          <div class="composer">
+            <input id="author" type="text" placeholder="Tu alias (ej. ozclef)" value="ozclef">
+            <input id="msgInput" type="text" placeholder="Escribe o pregunta (ej. ¿qué es X?)">
+            <button id="sendBtn" class="btn">Enviar</button>
+            <button id="askAI" class="btn ghost">Preguntar IA</button>
+          </div>
+
+          <div class="note">Mensajes guardados localmente si estás offline. Si hay KB local, la IA responde desde ahí; si no y estás online, intenta buscar en Wikipedia.</div>
+        </div>
+      </main>
+
+      <!-- sidebar -->
+      <aside class="card sidebar">
+        <h4>Herramientas / KB</h4>
+
+        <label class="small">Sembrar KB desde .txt (cada línea -> documento)</label>
+        <input id="kbFile" type="file" accept=".txt" />
+        <button id="loadKbBtn" class="btn" style="margin-top:8px;">Cargar KB</button>
+
+        <hr style="margin:10px 0; border:none; height:1px; background:#f3f4f3;" />
+
+        <label class="small">Importar/Exportar chat</label>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button id="exportChat" class="btn">Exportar .txt</button>
+          <button id="downloadBackup" class="btn ghost">Backup JSON</button>
+        </div>
+
+        <div style="margin-top:10px;">
+          <label class="small">Archivos locales</label>
+          <div id="filesList" class="files-list">Sin archivos...</div>
+        </div>
+
+        <hr style="margin:10px 0; border:none; height:1px; background:#f3f4f3;" />
+
+        <div>
+          <label class="small">Ajustes</label>
+          <div class="note">
+            <input id="useWeb" type="checkbox" checked /> Permitir búsqueda web (Wikipedia) si no hay respuesta local.
+            <br>
+            <input id="compactKb" type="checkbox" checked /> Comprimir KB en local (recomendado).
+          </div>
+        </div>
+
+        <hr style="margin:10px 0; border:none; height:1px; background:#f3f4f3;" />
+
+        <div style="display:flex; gap:8px;">
+          <button id="clearLocal" class="btn ghost">Borrar cache local</button>
+          <button id="seedExample" class="btn">Cargar ejemplo KB</button>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+<script>
+/* =========================================================
+   CONFIG / CONSTANTES
+   - Pega FIREBASE_CONFIG si quieres sincronizar con Firebase
+   ========================================================= */
+const FIREBASE_CONFIG = {
+  apiKey: "TU_API_KEY",
+  authDomain: "TU_PROYECTO.firebaseapp.com",
+  databaseURL: "https://TU_PROYECTO-default-rtdb.firebaseio.com",
+  projectId: "TU_PROYECTO"
+};
+const USE_FIREBASE = !!FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey !== "TU_API_KEY";
+
+/* CountAPI (contador) */
+const countNamespace = "ozclef";
+const countKey = "visitas-home";
+async function incAndShow(){
+  try{
+    const r = await fetch(`https://api.countapi.xyz/hit/${countNamespace}/${countKey}`);
+    const d = await r.json();
+    document.getElementById('visitas').textContent = d.value;
+  }catch(e){ document.getElementById('visitas').textContent = 'offline'; }
+}
+incAndShow();
+
+/* Inicializa Firebase si config */
+let db = null;
+if(USE_FIREBASE){
+  firebase.initializeApp(FIREBASE_CONFIG);
+  db = firebase.database();
+  console.log('Firebase listo.');
+}
+
+/* =========================================================
+   STORAGE: cola local comprimida + KB (knowledge base)
+   - se usa LZString para comprimir y ahorrar espacio
+   ========================================================= */
+const LOCAL_QUEUE_KEY = 'chat_local_v1';
+const KB_STORAGE_KEY   = 'kb_v1';    // almacenará array de passages (texto)
+const MAX_LOCAL_QUEUE  = 400;
+const MAX_MESSAGE_LEN  = 1200;       // truncar mensajes muy largos
+
+function isOnline(){ return navigator.onLine; }
+window.addEventListener('online', ()=> setStatus('online'));
+window.addEventListener('offline', ()=> setStatus('offline'));
+function setStatus(s){ document.getElementById('onlineStatus').textContent = s; }
+setStatus(isOnline() ? 'online' : 'offline');
+
+/* helpers compresión */
+function saveCompressed(key, obj){
+  const raw = JSON.stringify(obj);
+  const compressed = LZString.compressToUTF16(raw);
+  localStorage.setItem(key, compressed);
+}
+function loadCompressed(key){
+  const raw = localStorage.getItem(key);
+  if(!raw) return null;
+  try{
+    const decompressed = LZString.decompressFromUTF16(raw);
+    return JSON.parse(decompressed || 'null');
+  }catch(e){ console.warn('No se pudo descomprimir', e); return null; }
+}
+
+/* guardar y cargar cola local */
+async function loadLocalQueue(){ 
+  // devuelve array
+  const compressed = localStorage.getItem(LOCAL_QUEUE_KEY);
+  if(!compressed) return [];
+  try{
+    const maybe = LZString.decompressFromUTF16(compressed);
+    if(maybe) return JSON.parse(maybe);
+    return [];
+  }catch(e){ console.warn('loadLocalQueue error', e); return []; }
+}
+async function saveLocalQueue(queue){
+  // limitar tamaño
+  if(queue.length > MAX_LOCAL_QUEUE) queue.splice(0, queue.length - MAX_LOCAL_QUEUE);
+  const raw = JSON.stringify(queue);
+  const compressed = LZString.compressToUTF16(raw);
+  localStorage.setItem(LOCAL_QUEUE_KEY, compressed);
+}
+
+/* KB: cargar y guardar knowledge base (array de passages) */
+function saveKB(arr){
+  if(document.getElementById('compactKb').checked){
+    saveCompressed(KB_STORAGE_KEY, arr);
+  } else {
+    localStorage.setItem(KB_STORAGE_KEY, JSON.stringify(arr));
+  }
+}
+function loadKB(){
+  if(document.getElementById('compactKb').checked){
+    return loadCompressed(KB_STORAGE_KEY) || [];
+  } else {
+    const raw = localStorage.getItem(KB_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  }
+}
+
+/* =========================================================
+   RENDER / UI helpers
+   ========================================================= */
+const qs = s => document.querySelector(s);
+const messagesEl = qs('#messages');
+const authorInput = qs('#author');
+const msgInput = qs('#msgInput');
+
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]); }
+
+function renderMessage(msg, scroll=true){
+  const div = document.createElement('div');
+  div.className = 'msg ' + (msg.fromLocal ? 'me' : (msg.author===authorInput.value ? 'me' : ''));
+  const author = escapeHtml(msg.author||'anon');
+  const text = escapeHtml(msg.text || '');
+  div.innerHTML = `<strong>${author}</strong><div>${text}</div><span class="meta">${new Date(msg.ts).toLocaleString()}</span>`;
+  messagesEl.appendChild(div);
+  if(scroll) messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+/* render cola local en filesList */
+async function updateFilesList(){
+  const list = qs('#filesList');
+  list.innerHTML = '';
+  const q = await loadLocalQueue();
+  if(!q.length){ list.textContent = 'Sin mensajes locales pendientes.'; return; }
+  q.forEach(m => {
+    const el = document.createElement('div');
+    el.textContent = `${new Date(m.ts).toLocaleString()} — ${m.author}: ${m.text.slice(0,80)}`;
+    list.appendChild(el);
+  });
+}
+
+/* =========================================================
+   OPERACIONES CHAT: push local, enviar (Firebase opcional)
+   ========================================================= */
+async function pushLocal(msg){
+  msg.text = String(msg.text || '').slice(0, MAX_MESSAGE_LEN);
+  const q = await loadLocalQueue();
+  q.push(msg);
+  await saveLocalQueue(q);
+  renderMessage({...msg, fromLocal:true}, true);
+  updateFilesList();
+}
+
+async function sendMessage(){
+  const author = (authorInput.value || 'anon').trim();
+  const text = (msgInput.value || '').trim();
+  if(!text) return;
+  const msgObj = { author, text, ts: Date.now() };
+
+  if(USE_FIREBASE && isOnline()){
+    try {
+      const ref = db.ref('chats/home').push();
+      await ref.set(msgObj);
+      msgObj.id = ref.key;
+      renderMessage({...msgObj, fromLocal:false}, true);
+    } catch(e){
+      console.warn('Firebase push error, guardando local', e);
+      msgObj.fromLocal = true;
+      await pushLocal(msgObj);
+    }
+  } else {
+    msgObj.fromLocal = true;
+    await pushLocal(msgObj);
+  }
+  msgInput.value = '';
+}
+
+/* Enviar con Enter y botón */
+qs('#sendBtn').addEventListener('click', sendMessage);
+msgInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') sendMessage(); });
+
+/* listen firebase child_added */
+if(USE_FIREBASE){
+  const chatRef = db.ref('chats/home');
+  chatRef.on('child_added', snap => {
+    const data = snap.val(); data.id = snap.key; data.fromLocal = false;
+    // evitar duplicación simple (si local cola tiene exacto mismo ts/text/author)
+    loadLocalQueue().then(localQ=>{
+      const idx = localQ.findIndex(q => q.ts === data.ts && q.text === data.text && q.author === data.author);
+      if(idx >= 0){ localQ.splice(idx,1); saveLocalQueue(localQ); updateFilesList(); }
+      renderMessage(data);
+    });
+  });
+}
+
+/* cargar recientes de firebase */
+async function loadRecentFirebase(limit=30){
+  if(!USE_FIREBASE) return;
+  const ref = db.ref('chats/home').limitToLast(limit);
+  ref.once('value', snap => {
+    const data = snap.val() || {};
+    const items = Object.keys(data).map(k=>({id:k, ...data[k]})).sort((a,b)=>a.ts-b.ts);
+    items.forEach(it => renderMessage({...it, fromLocal:false}, false));
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  });
+}
+
+/* Inicialización: cargar local o firebase */
+window.addEventListener('DOMContentLoaded', async ()=>{
+  setTimeout(()=> setStatus(isOnline() ? 'online' : 'offline'), 250);
+  await updateFilesList();
+  if(USE_FIREBASE){
+    loadRecentFirebase();
+    if(isOnline()) syncLocalToFirebase();
+  } else {
+    // render cola local
+    const q = await loadLocalQueue();
+    q.forEach(m => renderMessage(m, false));
+  }
+});
+
+/* sincronizar cola local -> firebase al reconectar */
+async function syncLocalToFirebase(){
+  if(!USE_FIREBASE || !isOnline()) return;
+  const q = await loadLocalQueue();
+  if(!q.length) return;
+  for(const item of q){
+    try{
+      const ref = db.ref('chats/home').push();
+      await ref.set(item);
+      await new Promise(r=>setTimeout(r,120));
+    }catch(e){ console.warn('sync item error', e); }
+  }
+  localStorage.removeItem(LOCAL_QUEUE_KEY);
+  updateFilesList();
+}
+
+/* =========================================================
+   EXPORTAR / IMPORTAR chat y KB
+   ========================================================= */
+qs('#exportChat').addEventListener('click', async ()=>{
+  const q = await loadLocalQueue();
+  // forma legible .txt
+  const lines = q.map(m => `[${new Date(m.ts).toLocaleString()}] ${m.author}: ${m.text}`);
+  const blob = new Blob([lines.join('\n')], {type:'text/plain'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `chat_backup_${Date.now()}.txt`; a.click(); a.remove();
+});
+
+qs('#downloadBackup').addEventListener('click', async ()=>{
+  const q = await loadLocalQueue();
+  const blob = new Blob([JSON.stringify(q, null, 2)], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `chat_backup_json_${Date.now()}.json`; a.click(); a.remove();
+});
+
+/* borrar cache local */
+qs('#clearLocal').addEventListener('click', async ()=>{
+  if(confirm('Borrar cache local (mensajes y KB) ?')){ localStorage.removeItem(LOCAL_QUEUE_KEY); localStorage.removeItem(KB_STORAGE_KEY); messagesEl.innerHTML=''; updateFilesList(); alert('Hecho'); }
+});
+
+/* =========================================================
+   KB: cargar desde .txt y búsqueda simple por similitud
+   - Guardamos array de passages (texto)
+   - Index: precompute token sets para matching rápido
+   ========================================================= */
+let KB_INDEX = null; // [{text, tokens:Set}]
+function tokenize(s){
+  return s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu,' ').split(/\s+/).filter(Boolean);
+}
+function buildKbIndex(kbArray){
+  KB_INDEX = kbArray.map(text => {
+    const toks = tokenize(text);
+    const set = new Set(toks);
+    return { text, tokens: toks, tokenSet: set };
+  });
+  return KB_INDEX;
+}
+
+/* cargar KB desde archivo .txt: cada línea = doc */
+qs('#loadKbBtn').addEventListener('click', async ()=>{
+  const f = qs('#kbFile').files[0];
+  if(!f){ alert('Selecciona un .txt con tu KB (una línea = un doc)'); return; }
+  const txt = await f.text();
+  // dividir por líneas vacías o saltos
+  const parts = txt.split(/\r?\n/).map(r=>r.trim()).filter(Boolean);
+  if(!parts.length){ alert('No se detectaron líneas con texto'); return; }
+  saveKB(parts);
+  buildKbIndex(parts);
+  alert('KB cargada: ' + parts.length + ' items');
+});
+
+/* seed ejemplo */
+qs('#seedExample').addEventListener('click', ()=>{
+  const arr = [
+    "HTML es el lenguaje de marcado para crear páginas web.",
+    "CSS estiliza HTML; usa selectores, propiedades y valores.",
+    "JavaScript permite lógica, manipulación del DOM y fetch a APIs."
+  ];
+  saveKB(arr);
+  buildKbIndex(arr);
+  alert('Ejemplo de KB cargado.');
+});
+
+/* buscar mejor passage por query (score = intersección tokens / sqrt(lenA*lenB)) simple */
+function scoreText(queryTokens, item){
+  // queryTokens: array; item.tokenSet: Set
+  let common = 0;
+  for(const t of queryTokens){ if(item.tokenSet.has(t)) common++; }
+  if(common === 0) return 0;
+  const score = common / Math.sqrt(queryTokens.length * item.tokens.length);
+  return score;
+}
+function findBestLocalAnswer(query, topN=1){
+  const kb = loadKBSync(); // synchronous loader below
+  if(!kb || !kb.length) return null;
+  if(!KB_INDEX) buildKbIndex(kb);
+  const qToks = tokenize(query);
+  let best = null;
+  for(const it of KB_INDEX){
+    const sc = scoreText(qToks, it);
+    if(!best || sc > best.score){ best = {text: it.text, score: sc}; }
+  }
+  return best;
+}
+
+/* synchronous loader for KB (used inside response generator) */
+function loadKBSync(){
+  const compact = qs('#compactKb').checked;
+  if(compact){
+    const raw = localStorage.getItem(KB_STORAGE_KEY);
+    if(!raw) return [];
+    try{
+      const dec = LZString.decompressFromUTF16(raw);
+      return dec ? JSON.parse(dec) : [];
+    }catch(e){ return [];}
+  } else {
+    const raw = localStorage.getItem(KB_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  }
+}
+
+/* =========================================================
+   Generador de respuestas:
+   - Primero: busca en KB local
+   - Si score alto -> devuelve passage
+   - Si no y está permitido -> busca en Wikipedia (es)
+   ========================================================= */
+async function fetchWikiSummaryES(query){
+  try{
+    const q = encodeURIComponent(query);
+    const url = `https://es.wikipedia.org/api/rest_v1/page/summary/${q}`;
+    const r = await fetch(url);
+    if(!r.ok) return null;
+    const j = await r.json();
+    return j.extract || null;
+  }catch(e){ console.warn('wiki fetch err', e); return null; }
+}
+
+async function generateResponse(query){
+  // 1) intentar local
+  const local = findBestLocalAnswer(query);
+  if(local && local.score >= 0.12){ // threshold ajustable
+    return {source:'kb', text: local.text, score: local.score};
+  }
+
+  // 2) si permitido, intentar web (Wikipedia)
+  if(isOnline() && qs('#useWeb').checked){
+    const wiki = await fetchWikiSummaryES(query);
+    if(wiki) return {source:'wiki', text: wiki, score: 0.1};
+  }
+
+  // 3) fallback: sin respuesta
+  return {source:'none', text: 'No tengo información relevante local ni en web para esa consulta.', score:0};
+}
+
+/* botón: Preguntar IA */
+qs('#askAI').addEventListener('click', async ()=>{
+  const q = (msgInput.value || '').trim();
+  if(!q){ alert('Escribe la pregunta en el campo mensaje'); return; }
+  // mostrar query como mensaje de usuario
+  const user = { author: authorInput.value || 'anon', text: q, ts: Date.now(), fromLocal:true };
+  await pushLocal(user);
+
+  // generar respuesta
+  const resp = await generateResponse(q);
+  const botMsg = { author: 'oz-IA', text: resp.text, ts: Date.now() + 1 };
+  // si tienes Firebase y estás online, subir botMsg; si no, guardarlo local
+  if(USE_FIREBASE && isOnline()){
+    try{ await db.ref('chats/home').push().set(botMsg); renderMessage({...botMsg, fromLocal:false}, true); }catch(e){ botMsg.fromLocal=true; await pushLocal(botMsg); }
+  } else { botMsg.fromLocal = true; await pushLocal(botMsg); }
+  msgInput.value = '';
+});
+
+/* =========================================================
+   Util: importar KB desde archivo (solo JSON con array)
+   ========================================================= */
+async function importKBFromFile(file){
+  try{
+    const txt = await file.text();
+    const arr = JSON.parse(txt);
+    if(!Array.isArray(arr)) return alert('El archivo no contiene un array JSON de textos.');
+    saveKB(arr);
+    buildKbIndex(arr);
+    alert('KB importada: ' + arr.length + ' elementos.');
+  }catch(e){ alert('Error importando KB: ' + e.message); }
+}
+
+/* manejar cambios en files input local (no afectará KB) 

@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>IA local + Busqueda (Duck/Wiki) — ozclef</title>
+
+<!-- Compresión LZ -->
+<script src="https://cdn.jsdelivr.net/npm/lz-string@1.4.4/libs/lz-string.min.js"></script>
+
+<style>
+  :root{--accent:#4f46e5;--muted:#6b7280;--max-w:1000px}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Inter,system-ui,Arial;background:linear-gradient(135deg,#f7f7ff,#fff);color:#111;padding:18px;display:flex;justify-content:center}
+  .wrap{width:100%;max-width:var(--max-w)}
+  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+  h1{margin:0;font-size:1.2rem}
+  .grid{display:grid;grid-template-columns:1fr 360px;gap:14px}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}.sidebar{order:-1}}
+  .card{background:#fff;border-radius:10px;padding:12px;box-shadow:0 8px 24px rgba(15,23,42,0.06)}
+  .small{font-size:0.85rem;color:var(--muted)}
+  .chat-window{display:flex;flex-direction:column;height:560px}
+  .messages{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
+  .msg{max-width:78%;padding:8px 10px;border-radius:10px;background:#f3f4f6}
+  .msg.me{align-self:flex-end;background:linear-gradient(90deg,var(--accent),#3b82f6);color:#fff}
+  .msg .meta{display:block;font-size:0.72rem;color:rgba(0,0,0,0.45);margin-top:6px}
+  .composer{display:flex;gap:8px;margin-top:8px}
+  .composer input[type="text"]{flex:1;padding:10px;border-radius:8px;border:1px solid #e6e6e6}
+  .composer button{padding:10px 12px;border-radius:8px;background:var(--accent);color:#fff;border:0;cursor:pointer}
+  .files-list{max-height:220px;overflow:auto;margin-top:8px;border:1px dashed #eee;padding:8px;border-radius:8px}
+  .files-list div{padding:6px;border-bottom:1px solid #fafafa;font-size:0.95rem;cursor:pointer}
+  .btn{padding:8px 10px;border-radius:8px;border:0;background:var(--accent);color:#fff;cursor:pointer}
+  .btn.ghost{background:#fff;color:var(--accent);border:1px solid #e6e6e6}
+  .note{font-size:0.85rem;color:var(--muted);margin-top:6px}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>IA local + Búsqueda — ozclef</h1>
+      <div class="small">Modo: <strong>local</strong> (por defecto) · Fuentes web: DuckDuckGo / Wikipedia</div>
+    </header>
+
+    <div class="grid">
+      <main class="card">
+        <h3 class="small">Chat & IA</h3>
+
+        <div class="chat-window" style="margin-top:8px">
+          <div id="messages" class="messages" aria-live="polite"></div>
+
+          <div class="composer">
+            <input id="author" type="text" placeholder="Tu alias" value="ozclef">
+            <input id="msgInput" type="text" placeholder="Escribe o pregunta...">
+            <button id="sendBtn" class="btn">Enviar</button>
+            <button id="askAI" class="btn ghost">Preguntar IA</button>
+          </div>
+
+          <div class="note">Respuesta: primero KB local → si no hay, DuckDuckGo → si no, Wikipedia → si proporcionas URL, se intenta usarla (si CORS permite).</div>
+        </div>
+      </main>
+
+      <aside class="card sidebar">
+        <h4>Fuentes & Herramientas</h4>
+
+        <label class="small">1) Cargar KB desde .txt (cada línea = doc)</label>
+        <input id="kbFile" type="file" accept=".txt" />
+        <button id="loadKbBtn" class="btn" style="margin-top:8px">Cargar KB</button>
+
+        <hr style="margin:10px 0;border:none;height:1px;background:#f3f4f3"/>
+
+        <label class="small">2) Preguntar URL (ej: Google Doc export txt)</label>
+        <input id="urlInput" type="text" placeholder="Pega URL pública (export?format=txt)"/>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button id="fetchUrlBtn" class="btn">Cargar URL</button>
+          <button id="pasteUrlToChat" class="btn ghost">Preguntar desde URL</button>
+        </div>
+        <div class="note">Ej Google Docs export: <code>https://docs.google.com/document/d/ID/export?format=txt</code></div>
+
+        <hr style="margin:10px 0;border:none;height:1px;background:#f3f4f3"/>
+
+        <label class="small">3) Exportar / Importar</label>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button id="exportTxtBtn" class="btn">Exportar chat .txt</button>
+          <button id="backupJsonBtn" class="btn ghost">Backup JSON</button>
+        </div>
+
+        <div style="margin-top:10px">
+          <label class="small">4) Ajustes</label>
+          <div class="note">
+            <input id="useWeb" type="checkbox" checked /> Permitir búsquedas web (DuckDuckGo/Wikipedia)<br>
+            <input id="compactKb" type="checkbox" checked /> Comprimir KB en local (recomendado)
+          </div>
+        </div>
+
+        <hr style="margin:10px 0;border:none;height:1px;background:#f3f4f3"/>
+
+        <div style="display:flex;gap:8px">
+          <button id="clearLocal" class="btn ghost">Borrar local</button>
+          <button id="seedExample" class="btn">Cargar ejemplo KB</button>
+        </div>
+
+        <div style="margin-top:8px" class="note">Si una URL muestra CORS, el navegador no permitirá leerla. Si pasa eso, usa la opción de exportar el doc a .txt y subirlo, o usa un proxy/serverless (te doy el código si quieres).</div>
+      </aside>
+    </div>
+  </div>
+
+<script>
+/* ----------------------
+   Parámetros (ajustables)
+   ---------------------- */
+const LOCAL_QUEUE_KEY = 'chat_local_v1';
+const KB_STORAGE_KEY = 'kb_v1';
+const MAX_LOCAL_QUEUE = 400;
+const MAX_MESSAGE_LEN = 1200;
+
+/* -------------------------------------------
+   Helpers: compresión con LZString, almacenamiento
+   ------------------------------------------- */
+function saveCompressedRaw(key, obj){
+  const raw = JSON.stringify(obj);
+  localStorage.setItem(key, LZString.compressToUTF16(raw));
+}
+function loadCompressedRaw(key){
+  const raw = localStorage.getItem(key);
+  if(!raw) return null;
+  try{
+    const dec = LZString.decompressFromUTF16(raw);
+    return dec ? JSON.parse(dec) : null;
+  }catch(e){ console.warn('Decompress err', e); return null; }
+}
+function saveQueue(arr){
+  if(arr.length > MAX_LOCAL_QUEUE) arr.splice(0, arr.length - MAX_LOCAL_QUEUE);
+  saveCompressedRaw(LOCAL_QUEUE_KEY, arr);
+}
+function loadQueue(){ return loadCompressedRaw(LOCAL_QUEUE_KEY) || []; }
+function saveKB(arr){
+  if(document.getElementById('compactKb').checked) saveCompressedRaw(KB_STORAGE_KEY, arr);
+  else localStorage.setItem(KB_STORAGE_KEY, JSON.stringify(arr));
+}
+function loadKB(){ 
+  if(document.getElementById('compactKb').checked) return loadCompressedRaw(KB_STORAGE_KEY) || [];
+  const raw = localStorage.getItem(KB_STORAGE_KEY); return raw ? JSON.parse(raw) : [];
+}
+
+/* -------------------------------------------
+   UI helpers
+   ------------------------------------------- */
+const qs = s => document.querySelector(s);
+const messagesEl = qs('#messages');
+const authorInput = qs('#author');
+const msgInput = qs('#msgInput');
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]); }
+function renderMessage(msg, scroll=true){
+  const div = document.createElement('div');
+  div.className = 'msg ' + (msg.fromLocal ? 'me' : (msg.author===authorInput.value ? 'me' : ''));
+  div.innerHTML = `<strong>${escapeHtml(msg.author||'anon')}</strong><div>${escapeHtml(msg.text||'')}</div><span class="meta">${new Date(msg.ts).toLocaleString()}</span>`;
+  messagesEl.appendChild(div);
+  if(scroll) messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+/* inicializar con cola local */
+window.addEventListener('DOMContentLoaded', ()=> {
+  const q = loadQueue();
+  q.forEach(m => renderMessage(m,false));
+});
+
+/* push local (guarda y renderiza) */
+function pushLocal(msg){
+  msg.text = String(msg.text||'').slice(0, MAX_MESSAGE_LEN);
+  const q = loadQueue();
+  q.push(msg);
+  saveQueue(q);
+  renderMessage({...msg, fromLocal:true}, true);
+}
+
+/* enviar (solo local por ahora) */
+qs('#sendBtn').addEventListener('click', ()=> {
+  const author = (authorInput.value||'anon').trim();
+  const text = (msgInput.value||'').trim();
+  if(!text) return;
+  const msg = {author, text, ts: Date.now()};
+  pushLocal(msg);
+  msgInput.value = '';
+});
+
+/* -------------------------------------------
+   KB local: tokenizar y búsqueda por similitud simple
+   ------------------------------------------- */
+function tokenize(s){ return s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu,' ').split(/\s+/).filter(Boolean); }
+let KB_INDEX = null;
+function buildKbIndex(kbArray){
+  KB_INDEX = kbArray.map(text => {
+    const toks = tokenize(text); return {text, tokens:toks, tokenSet:new Set(toks)};
+  });
+}
+
+/* score simple: intersección / sqrt(lenA*lenB) */
+function scoreText(qToks, item){
+  let common=0;
+  for(const t of qToks) if(item.tokenSet.has(t)) common++;
+  if(!common) return 0;
+  return common / Math.sqrt(qToks.length * item.tokens.length);
+}
+function findBestLocal(query){
+  const kb = loadKB();
+  if(!kb.length) return null;
+  if(!KB_INDEX) buildKbIndex(kb);
+  const qToks = tokenize(query);
+  let best=null;
+  for(const it of KB_INDEX){
+    const sc = scoreText(qToks, it);
+    if(!best || sc>best.score) best={text:it.text,score:sc};
+  }
+  return best;
+}
+
+/* -------------------------------------------
+   Web search: DuckDuckGo Instant Answer + Wikipedia
+   (no API keys)
+   ------------------------------------------- */
+async function duckDuckGo(query){
+  try{
+    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
+    const resp = await fetch(url);
+    if(!resp.ok) return null;
+    const j = await resp.json();
+    if(j.AbstractText) return j.AbstractText;
+    if(Array.isArray(j.RelatedTopics) && j.RelatedTopics.length){
+      const t = j.RelatedTopics[0];
+      return t.Text || (t.Topics && t.Topics[0] && t.Topics[0].Text) || null;
+    }
+    return null;
+  }catch(e){ console.warn('DDG err', e); return null; }
+}
+async function wikiSummaryES(query){
+  try{
+    const url = `https://es.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`;
+    const r = await fetch(url);
+    if(!r.ok) return null;
+    const j = await r.json();
+    return j.extract || null;
+  }catch(e){ console.warn('wiki err', e); return null; }
+}
+
+/* -------------------------------------------
+   Fetch arbitrary URL (si CORS lo permite)
+   - Ideal: Google Docs export (public): .../export?format=txt
+   ------------------------------------------- */
+async function fetchUrlText(url){
+  try{
+    const r = await fetch(url);
+    if(!r.ok) throw new Error('No OK: ' + r.status);
+    const txt = await r.text();
+    // intenta extraer texto simple (si HTML, quitar tags)
+    if(/<\s*html/i.test(txt)) return txt.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim().slice(0,5000);
+    return txt.slice(0,5000);
+  }catch(e){
+    console.warn('fetchUrl err', e);
+    throw e;
+  }
+}
+
+/* -------------------------------------------
+   Generar respuesta: local -> DDG -> Wiki -> URL (según checkbox)
+   ------------------------------------------- */
+async function generateResponse(query, opts={tryWeb:true, tryUrl:null}){
+  // 1) local KB
+  const best = findBestLocal(query);
+  if(best && best.score >= 0.12) return {source:'kb', text: best.text, score:best.score};
+
+  // 2) if URL provided, try fetchUrl first (user specified)
+  if(opts.tryUrl){
+    try{
+      const t = await fetchUrlText(opts.tryUrl);
+      if(t) return {source:'url', text:t, score:0.11};
+    }catch(e){ /* fallthrough */ }
+  }
+
+  // 3) web: duckduckgo then wiki
+  if(opts.tryWeb && document.getElementById('useWeb').checked){
+    const ddg = await duckDuckGo(query);
+    if(ddg) return {source:'ddg', text:ddg, score:0.1};
+    const wiki = await wikiSummaryES(query);
+    if(wiki) return {source:'wiki', text:wiki, score:0.08};
+  }
+
+  return {source:'none', text:'No tengo información local ni web sobre eso.'};
+}
+
+/* -------------------------------------------
+   Preguntar IA: usuario -> pushLocal -> generarResponse -> pushLocal respuesta
+   ------------------------------------------- */
+qs('#askAI').addEventListener('click', async ()=>{
+  const q = (msgInput.value||'').trim();
+  if(!q) return alert('Escribe tu pregunta en el campo de mensaje');
+  const user = {author: authorInput.value||'anon', text:q, ts: Date.now()};
+  pushLocal(user);
+
+  // opcional: si usuario pegó URL y quiere preguntar desde ella
+  const urlField = qs('#urlInput').value.trim();
+  const opts = { tryWeb: true, tryUrl: urlField || null };
+
+  const resp = await generateResponse(q, opts);
+  const botMsg = {author:'oz-IA', text: resp.text, ts: Date.now()+1};
+  pushLocal({...botMsg});
+  msgInput.value = '';
+});
+
+/* -------------------------------------------
+   Cargar KB desde .txt (cada linea -> item)
+   ------------------------------------------- */
+qs('#loadKbBtn').addEventListener('click', async ()=>{
+  const f = qs('#kbFile').files[0];
+  if(!f) return alert('Selecciona un .txt con tu KB (una línea = documento)');
+  const txt = await f.text();
+  const parts = txt.split(/\r?\n/).map(r=>r.trim()).filter(Boolean);
+  if(!parts.length) return alert('Archivo vacío');
+  saveKB(parts);
+  buildKbIndex(parts);
+  alert('KB cargada: ' + parts.length + ' items');
+});
+
+/* -------------------------------------------
+   Fetch URL button: intenta traer texto y lo muestra en chat
+   ------------------------------------------- */
+qs('#fetchUrlBtn').addEventListener('click', async ()=>{
+  const url = qs('#urlInput').value.trim();
+  if(!url) return alert('Pega una URL');
+  try{
+    const text = await fetchUrlText(url);
+    const sysMsg = {author:'oz-IA', text:'Contenido cargado desde URL:\n' + text.slice(0,2000), ts: Date.now()};
+    pushLocal(sysMsg);
+  }catch(e){
+    alert('Error al leer la URL desde el navegador (posible CORS). Opciones: 1) publica el doc y usa export?format=txt 2) usa un proxy/serverless. Dime y te doy el código.');
+  }
+});
+
+/* -------------------------------------------
+   Export / Backup
+   ------------------------------------------- */
+qs('#exportTxtBtn').addEventListener('click', async ()=>{
+  const q = loadQueue();
+  const lines = q.map(m => `[${new Date(m.ts).toLocaleString()}] ${m.author}: ${m.text}`);
+  const blob = new Blob([lines.join('\n')], {type:'text/plain'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `chat_${Date.now()}.txt`; a.click(); a.remove();
+});
+qs('#backupJsonBtn').addEventListener('click', async ()=>{
+  const q = loadQueue(); const blob = new Blob([JSON.stringify(q,null,2)], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `chat_backup_${Date.now()}.json`; a.click(); a.remove();
+});
+qs('#clearLocal').addEventListener('click', ()=>{ if(confirm('Borrar local (chat + KB)?')){ localStorage.removeItem(LOCAL_QUEUE_KEY); localStorage.removeItem(KB_STORAGE_KEY); messagesEl.innerHTML=''; alert('Hecho'); }});
+qs('#seedExample').addEventListener('click', ()=>{ const arr=['HTML es el lenguaje de marcado.','CSS aplica estilos.','JavaScript es lógica.']; saveKB(arr); buildKbIndex(arr); alert('Ejemplo KB cargado'); });
+
+/* -------------------------------------------
+   Nota final: instrucciones sobre Google Docs export:
+   - En Google Docs: Archivo > Publicar en la web (o compartir -> cualquiera con enlace)
+   - Usa URL: https://docs.google.com/document/d/ID/export?format=txt
+   - Pégala en el campo URL y pulsa "Cargar URL"
+   Si CORS bloquea, sube el .txt descargado o usa serverless (te doy código).
+   ------------------------------------------- */
+</script>
+</body>
+</html>

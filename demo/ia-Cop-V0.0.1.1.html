@@ -1,0 +1,79 @@
+
+<!--HTML-->
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>BIUS-IA Web Demo</title>
+    <link rel="stylesheet" href="styles.css">
+<style>
+/*styles.css
+CSS*/
+body { font-family: Arial, sans-serif; background: #f8faff; color: #222; }
+main { max-width: 500px; margin: 60px auto; background: #fff; padding: 2em; border-radius: 16px; box-shadow: 0 2px 12px #bbb; text-align: center; }
+input[type="file"] { margin-bottom: 1em; }
+button { background: #4e97d8; color: #fff; border: none; border-radius: 6px; padding: 0.7em 1.5em; margin: 0.5em; cursor: pointer; }
+button:hover { background: #276bbd; }
+.modal { display: none; position: fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); justify-content:center; align-items:center; z-index:10; }
+.modal-content { background:#fff; padding:2em; border-radius:10px; text-align:center; }
+</style>
+
+</head>
+<body>
+    <div id="privacy-modal" class="modal">
+        <div class="modal-content">
+            <h2>Aviso de Privacidad</h2>
+            <p>
+                Esta web utiliza IA y procesa información de tus documentos y archivos de internet.<br>
+                Puedes consultar nuestra <a href="#">política de ética y privacidad</a>.
+            </p>
+            <button id="accept-privacy">Aceptar</button>
+            <button id="reject-privacy">Rechazar</button>
+        </div>
+    </div>
+    <main>
+        <h1>BIUS-IA Personalizada</h1>
+        <input type="file" id="fileInput" multiple />
+        <button onclick="loadInternetDocs()">Cargar archivos de internet</button>
+        <div id="output"></div>
+    </main>
+    <script src="app.js"></script>
+<script>
+//app.js
+//JavaScript
+window.onload = function() {
+    if (!localStorage.getItem('privacyAccepted')) {
+        document.getElementById('privacy-modal').style.display = 'flex';
+    }
+};
+document.getElementById('accept-privacy').onclick = function() {
+    localStorage.setItem('privacyAccepted', 'true');
+    document.getElementById('privacy-modal').style.display = 'none';
+};
+document.getElementById('reject-privacy').onclick = function() {
+    document.getElementById('privacy-modal').innerHTML = "<h2>No puedes usar la web sin aceptar la privacidad.</h2>";
+};
+
+document.getElementById('fileInput').addEventListener('change', function(evt) {
+    const files = evt.target.files;
+    for (let file of files) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            // Aquí procesas el contenido de cada archivo y lo pasas a la IA
+            document.getElementById('output').innerHTML +=
+                `<pre>${file.name}\n${e.target.result.substring(0,1000)}</pre>`;
+        };
+        reader.readAsText(file);
+    }
+});
+
+// Simulación: cargar archivos de internet
+function loadInternetDocs() {
+    fetch('https://raw.githubusercontent.com/B-I-U-S/BIUS-IA/main/README.md')
+        .then(res => res.text())
+        .then(txt => {
+            document.getElementById('output').innerHTML += `<pre>README.md\n${txt.substring(0,1000)}</pre>`;
+        });
+}
+</body>
+</html>

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Confirmação de Presença</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;700&family=Open+Sans&display=swap" rel="stylesheet">
+  <style>
+    /* ... (Mantén tus estilos) ... */
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Confirme sua Presença</h1>
+    <p>Estamos muito felizes com sua presença! Por favor, confirme abaixo:</p>
+    <form id="formConfirmacao" autocomplete="off">
+      <label for="nomeConvidado">Nome dos convidados:</label>
+      <input type="text" id="nomeConvidado" placeholder="Digite seu nome e dos acompanhantes" required />
+      <button type="submit">Confirmar Presença</button>
+    </form>
+    <div class="message" id="mensagemSucesso"></div>
+    <small style="color:#888;display:block;margin-top:12px;">
+      <strong>Privacidade:</strong> Seu nome será usado apenas para registrar sua presença no evento. Não coletamos outros dados pessoais.
+    </small>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-app.js";
+    import { getDatabase, ref, push } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-database.js";
+
+    const firebaseConfig = {
+      apiKey: "TU_API_KEY",
+      authDomain: "TU_DOMINIO.firebaseapp.com",
+      databaseURL: "https://TU_DOMINIO.firebaseio.com",
+      projectId: "TU_PROJETO_ID",
+      storageBucket: "TU_BUCKET.appspot.com",
+      messagingSenderId: "TU_SENDER_ID",
+      appId: "TU_APP_ID"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    document.getElementById('formConfirmacao').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const nome = document.getElementById('nomeConvidado').value.trim();
+      const msg = document.getElementById('mensagemSucesso');
+      if (nome === '') {
+        msg.textContent = 'Por favor, insira seu nome.';
+        msg.style.color = '#f44336';
+        return;
+      }
+      try {
+        const confirmacoesRef = ref(db, 'confirmacoes/');
+        await push(confirmacoesRef, {
+          nome: nome,
+          timestamp: new Date().toISOString()
+        });
+        msg.textContent = 'Confirmação enviada com sucesso! Obrigado. 💖';
+        msg.style.color = '#4caf50';
+        document.getElementById('nomeConvidado').value = '';
+      } catch (err) {
+        msg.textContent = 'Ocorreu um erro ao enviar sua confirmação. Tente novamente.';
+        msg.style.color = '#f44336';
+      }
+    });
+  </script>
+</body>
+</html>
